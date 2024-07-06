@@ -386,3 +386,8 @@ torchrun --nproc_per_node 8 train.py \
     --output_dir="checkpoints/dust3r_512dpt"
 
 ```
+
+
+## CT README 
+
+python3 ct_demo.py --input_dir data/barrel2

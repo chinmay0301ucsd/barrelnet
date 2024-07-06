@@ -5,7 +5,7 @@
 # utilitary functions for DUSt3R
 # --------------------------------------------------------
 import torch
-
+import os
 
 def fill_default_args(kwargs, func):
     import inspect  # a bit hacky but it works reliably
@@ -119,3 +119,26 @@ def invalid_to_zeros(arr, valid_mask, ndim=999):
     if arr.ndim > ndim:
         arr = arr.flatten(-2 - (arr.ndim - ndim), -2)
     return arr, nnz
+
+
+
+def save_dust3r_outs(focals, poses, pts3d, savepath):
+    """ Code to save output of dust3r after global alignment into a dictionary
+    Args: 
+        focals (torch.Tensor): Optimized Focal length of the N cameras [N,1]
+        poses (torch.Tensor): Optimized Camera Poses [N,4,4]
+        pts3d list of (torch.Tensor): Point clouds as seen from each camera. 
+    Returns:
+        None
+        saves a .pth file, can be loaded using torch.load()
+    """
+    out_dict = {}
+    pts3d = [pts.cpu().detach() for pts in pts3d]
+    out_dict['focals'] = focals.cpu().detach()
+    out_dict['poses'] = poses.cpu().detach()
+    out_dict['pts3d'] = pts3d
+    os.makedirs(os.path.dirname(savepath), exist_ok=True)
+    torch.save(out_dict, savepath)
+    print(f"Saved Dust3r outputs to {savepath}")
+    
+    
