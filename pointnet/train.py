@@ -37,7 +37,7 @@ def compute_loss(sample, radius_pred, zshift_pred, axis_pred, use_radius_loss=Tr
         loss = loss + loss_zshift
     return loss, loss_radius, loss_axis, loss_zshift
 
-def train(model, train_loader, optimizer, scheduler, writer, num_epochs=5000, save_epoch=1000, test_epoch=1000, save_dir='weights/r0'):
+def train(model, train_loader, optimizer, scheduler, writer, config, save_dir='weights/r0'):
     """ 
     ## TODO: Too many train config parameters. Pass them as a dictionary through a yaml file or something.
 	Train the model for num_epochs
@@ -47,7 +47,7 @@ def train(model, train_loader, optimizer, scheduler, writer, num_epochs=5000, sa
     num_epochs = config['train']['num_epochs']
     save_epoch = config['train']['save_epoch']
     test_epoch = config['train']['test_epoch']
-    
+    save_dir = config['train']['save_dir']
     os.makedirs(save_dir, exist_ok=True)
     model.train()  # Set model to training mode
     for epoch in range(num_epochs):
@@ -110,14 +110,15 @@ def test(model, test_loader, writer, epoch=0):
             running_acc_zshift += acc_zshift.item()
 
     writer.add_scalar("Mean Axis Test Accuracy", running_acc_axis / len(test_loader), epoch)
-    writer.add_scalar("Mean Radius Test Accuracy", running_acc_radius / len(test_loader), epoch)
-    writer.add_scalar("Mean ZShift Test Accuracy", running_acc_zshift / len(test_loader), epoch)
+    writer.add_scalar("Mean Radius Test Error", running_acc_radius / len(test_loader), epoch)
+    writer.add_scalar("Mean ZShift Test Error", running_acc_zshift / len(test_loader), epoch)
         
 
 if __name__=="__main__":
 	config = load_config('configs/config.yaml')
 	dirname = str(uuid.uuid4()).replace('-', '')[:6]
 	save_dir = os.path.join('logs', dirname, 'weights')
+	config['train']['save_dir'] = save_dir
 	os.makedirs(save_dir, exist_ok=True)
 
 	writer = SummaryWriter(f'logs/{dirname}')
