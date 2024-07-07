@@ -5,7 +5,7 @@ from tqdm import tqdm
 
 from pointnet_utils import PointNetEncoder, feature_transform_reguliarzer
 class BarrelNet(nn.Module):
-    def __init__(self, k=4, normal_channel=True):
+    def __init__(self, k=5, normal_channel=True):
         super(BarrelNet, self).__init__()
         if normal_channel:
             channel = 6
@@ -28,7 +28,8 @@ class BarrelNet(nn.Module):
         x = F.relu(self.bn1(self.fc1(x)))
         x = F.relu(self.bn2(self.dropout(self.fc2(x))))
         x = self.fc3(x)
-        radius = F.sigmoid(x[:,-1])        
+        radius = F.sigmoid(x[:,3])    
+        zshift = F.tanh(x[:,4]) * 0.5    
         normal = torch.concatenate([F.tanh(x[:,:2]), F.sigmoid(x[:,2:3])], dim=1)
         normal = normal / torch.linalg.norm(normal, dim=-1, keepdim=True)
-        return radius, normal 
+        return radius, zshift, normal 

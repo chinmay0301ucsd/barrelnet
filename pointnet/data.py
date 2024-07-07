@@ -84,21 +84,23 @@ def prepare_point_cloud(points, normal, hr_ratio_range=[1/4, 1/2], max_burial_pe
 		valid_pts (torch.tensor) : Rotated point cloud, and clipped so that only points above ocean floor are visible 
 		scale (float) - factor by which radius is to be scaled, for easier regression by pointnet.
 		radius (float) - randomly sampled radius of the cylinder . It's unscaled 
-		burial_offset (float) - z distance that the cylinder is offseted by to simulate burial 
+		burial_z (float) - Relative Displacement of Barrel Center along Z axis inside / outside the ocean floor w.r.t height of the cylinder
     """    
     point_cloud = points.clone().to(points.device)
     radius = hr_ratio_range[0] + torch.rand(1)[0]* (hr_ratio_range[1] - hr_ratio_range[0]) 
     point_cloud[:,:2] *= radius # Scaling height of the cylinder to be 2.5 - 3.5 times the radius 
     point_cloud_rot = rotate_to_axis(point_cloud, normal)
     
-    ## Total Z extent spanned by the barrel after rotation
-    z_range = torch.max(point_cloud_rot[:,-1]) - torch.min(point_cloud_rot[:,-1])
-    burial_offset = max_burial_percent * (torch.rand(1)[0] - 0.5) * z_range
+    ## TODO: Double Check this
+    ## Total Z extent spanned by the barrel after rotation. 
+    z_range = 1.0 # z_range is going to dot product of normal_range and Z axis, since height=1.0 
+    burial_z = max_burial_percent * (torch.rand(1)[0] - 0.5) # Relative Displacement of Barrel Center along Z axis inside / outside the ocean floor w.r.t height of the cylinder
+    burial_offset = burial_z * z_range
     point_cloud_rot[:,-1] += burial_offset
     valid_pts = point_cloud_rot[point_cloud_rot[:,-1] > 0]
     
     ## TODO : Add code here to compute burial fraction, for synthetic data. 
-    return valid_pts, radius, burial_offset
+    return valid_pts, radius, burial_z
 
 def normalize_pc(valid_pts):
     """
@@ -144,7 +146,7 @@ class CylinderData(Dataset):
 			self.pts.append(pts)
 
 		self.radii = torch.stack(self.radii)
-		self.burial_offsets = torch.stack(self.burial_offsets).cpu()
+		self.burial_offsets = torch.stack(self.burial_offsets)
 		self.scales = torch.tensor(self.scales)
 
 		self.transform = transform ## Adding noise etc
@@ -202,7 +204,8 @@ class CylinderData(Dataset):
 		sample = {'pts': pts.permute(1,0),
             	  'scale_gt': self.scales[idx],
                	  'radius_gt': self.radii[idx],
-                  'axis_vec': self.normals[idx]}
+                  'axis_vec': self.normals[idx],
+                  'burial_z': self.burial_offsets[idx]}
 
 		if self.transform:
 			sample['pts'] = self.transform(sample['pts'])
