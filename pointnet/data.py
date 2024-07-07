@@ -24,7 +24,7 @@ def pad_point_cloud(point_cloud, max_points=1000):
 	padded_cloud[:length, :] = pc[:length, :]
 	return padded_cloud
 
-def generate_cylinder_pts(radius, height, sections=64, num_pts=1000):
+def generate_cylinder_pts(radius, height, sections=64, num_pts=1000, noise_level=0):
     """
     Create a capped cylinder using trimesh.
     
@@ -40,6 +40,8 @@ def generate_cylinder_pts(radius, height, sections=64, num_pts=1000):
     capped_cylinder = trimesh.creation.cylinder(radius=radius, height=height, sections=sections, cap=True)
     points, _ = trimesh.sample.sample_surface(capped_cylinder, num_pts)
     points = torch.from_numpy(points).float().cuda()
+    noise = torch.randn_like(points).cuda() * noise_level
+    points = points + noise
     return points
 
 def rotate_to_axis(point_cloud, axis, device='cuda'):
@@ -87,14 +89,16 @@ def prepare_point_cloud(points, normal, hr_ratio_range=[1/4, 1/2], max_burial_pe
 		burial_z (float) - Relative Displacement of Barrel Center along Z axis inside / outside the ocean floor w.r.t height of the cylinder
     """    
     point_cloud = points.clone().to(points.device)
-    radius = hr_ratio_range[0] + torch.rand(1)[0]* (hr_ratio_range[1] - hr_ratio_range[0]) 
+    radius = hr_ratio_range[0] + torch.rand(1)[0] * (hr_ratio_range[1] - hr_ratio_range[0]) 
     point_cloud[:,:2] *= radius # Scaling height of the cylinder to be 2.5 - 3.5 times the radius 
     point_cloud_rot = rotate_to_axis(point_cloud, normal)
     
-    ## TODO: Double Check this
+    ## TODO: Double Check this, the burial part is kinda weird
     ## Total Z extent spanned by the barrel after rotation. 
-    z_range = 1.0 # z_range is going to dot product of normal_range and Z axis, since height=1.0 
-    burial_z = max_burial_percent * (torch.rand(1)[0] - 0.5) # Relative Displacement of Barrel Center along Z axis inside / outside the ocean floor w.r.t height of the cylinder
+    z_range = (torch.max(points[:,-1]) - torch.min(points[:,-1])).item() # z_range is going to dot product of normal_range and Z axis, since height=1.0 
+    z_rot_range = (torch.max(point_cloud_rot[:,-1]) - torch.min(point_cloud_rot[:,-1])).item()
+    
+    burial_z = max_burial_percent * (torch.rand(1)[0] - 0.5) * z_rot_range / z_range # Relative Displacement of Barrel Center along Z axis inside / outside the ocean floor w.r.t height of the cylinder
     burial_offset = burial_z * z_range
     point_cloud_rot[:,-1] += burial_offset
     valid_pts = point_cloud_rot[point_cloud_rot[:,-1] > 0]
@@ -119,7 +123,7 @@ def normalize_pc(valid_pts):
     return pts, scale 
 
 class CylinderData(Dataset):
-	def __init__(self, num_poses=10000, num_surface_samples=3000, max_points=1000, transform=None, max_burial_percent=0.7):
+	def __init__(self, num_poses=10000, num_surface_samples=3000, max_points=1000, transform=None, max_burial_percent=0.7, noise_level=0.0):
 		"""
 		Args:
 			num_poses : number of axis vectors to sample 
@@ -128,7 +132,7 @@ class CylinderData(Dataset):
 			transform (callable, optional) : Optional transform to be applied
 				on a sample.
 		"""
-		self.points = generate_cylinder_pts(1.0, 1.0, num_pts = num_surface_samples)
+		self.points = generate_cylinder_pts(1.0, 1.0, num_pts=num_surface_samples, noise_level=noise_level)
 		self.max_points = max_points
 		self.normals = self.sample_normals(num_poses)
 		self.radii = []
@@ -139,6 +143,8 @@ class CylinderData(Dataset):
 		## TODO: Later remove this for loop, and make this one shot.
 		for i in tqdm(range(num_poses)):
 			valid_pts, radius, burial_offset = prepare_point_cloud(self.points, self.normals[i], max_burial_percent=max_burial_percent)
+			if valid_pts.shape[0] <=0:
+				continue
 			pts, scale = normalize_pc(valid_pts)
 			self.radii.append(radius)
 			self.burial_offsets.append(burial_offset)

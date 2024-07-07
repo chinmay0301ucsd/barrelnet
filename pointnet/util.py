@@ -39,3 +39,5 @@ def monte_carlo_volume_ratio(n_points, x1, x2, r, a, b, c, d):
     above_plane, below_plane = classify_points(points, a, b, c, d)
     ratio = above_plane / (above_plane + below_plane)
     return ratio
+
+
