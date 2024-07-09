@@ -13,8 +13,9 @@ import roma
 from data import generate_cylinder_pts, prepare_point_cloud, normalize_pc, CylinderData
 from mpl_toolkits.mplot3d import Axes3D
 from torch.utils.data import Dataset, DataLoader
-from pointnet_utils import PointNetEncoder, feature_transform_reguliarzer
-from barrelnet import BarrelNet
+
+from barrelnet.pointnet.pointnet_utils import PointNetEncoder, feature_transform_reguliarzer
+from barrelnet.pointnet.barrelnet import BarrelNet
 
 def load_config(config_file):
     with open(config_file, 'r') as file:

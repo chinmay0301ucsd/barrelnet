@@ -3,7 +3,9 @@ import torch.utils.data
 import torch.nn.functional as F
 from tqdm import tqdm
 
-from pointnet_utils import PointNetEncoder, feature_transform_reguliarzer
+from barrelnet.pointnet.pointnet_utils import PointNetEncoder, feature_transform_reguliarzer
+
+
 class BarrelNet(nn.Module):
     def __init__(self, k=5, normal_channel=True):
         super(BarrelNet, self).__init__()

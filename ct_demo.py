@@ -1,11 +1,34 @@
 import os
 import argparse
-from dust3r.inference import inference
-from dust3r.model import AsymmetricCroCo3DStereo
-from dust3r.utils.image import load_images
-from dust3r.utils.misc import save_dust3r_outs
-from dust3r.image_pairs import make_pairs
-from dust3r.cloud_opt import global_aligner, GlobalAlignerMode
+
+import torch
+
+from dust3r.dust3r.inference import inference
+from dust3r.dust3r.model import AsymmetricCroCo3DStereo
+from dust3r.dust3r.utils.image import load_images
+from dust3r.dust3r.image_pairs import make_pairs
+from dust3r.dust3r.cloud_opt import global_aligner, GlobalAlignerMode
+
+
+def save_dust3r_outs(focals, poses, pts3d, savepath):
+    """ Code to save output of dust3r after global alignment into a dictionary
+    Args: 
+        focals (torch.Tensor): Optimized Focal length of the N cameras [N,1]
+        poses (torch.Tensor): Optimized Camera Poses [N,4,4]
+        pts3d list of (torch.Tensor): Point clouds as seen from each camera. 
+    Returns:
+        None
+        saves a .pth file, can be loaded using torch.load()
+    """
+    out_dict = {}
+    pts3d = [pts.cpu().detach() for pts in pts3d]
+    out_dict['focals'] = focals.cpu().detach()
+    out_dict['poses'] = poses.cpu().detach()
+    out_dict['pts3d'] = pts3d
+    os.makedirs(os.path.dirname(savepath), exist_ok=True)
+    torch.save(out_dict, savepath)
+    print(f"Saved Dust3r outputs to {savepath}")
+
 
 if __name__ == '__main__':
     device = 'cuda'

@@ -34,7 +34,7 @@ def generate_cylinder_pts(radius, height, sections=64, num_pts=1000, noise_level
         sections (int): Number of sections for the cylinder's roundness.
         
     Returns:
-       points (torch.tensor) : [num_pts, 3]
+		points (torch.tensor) : [num_pts, 3]
     """
     # Create the capped cylinder with cap=True
     capped_cylinder = trimesh.creation.cylinder(radius=radius, height=height, sections=sections, cap=True)
