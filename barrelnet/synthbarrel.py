@@ -120,8 +120,10 @@ def get_cyl_endpoints(cylax, h, z):
     # force vector to point up
     if cylax[2] < 0:
         cylax = -cylax
-    x1 = -cylax * (h / 2) + z
-    x2 = cylax * (h / 2) + z
+    x1 = -cylax * (h / 2)
+    x1[2] += z
+    x2 = cylax * (h / 2)
+    x2[2] += z
     return x1, x2
 
 
