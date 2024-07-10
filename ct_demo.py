@@ -1,5 +1,6 @@
-import os
 import argparse
+from pathlib import Path
+import os
 import sys
 
 import torch
@@ -40,7 +41,7 @@ if __name__ == "__main__":
     niter = 300
     
     parser = argparse.ArgumentParser(description = "Argument Parser for saving dust3r outputs")    
-    parser.add_argument("--input_dir", type=str, default="data/barrel2/", required=True, 
+    parser.add_argument("--input_dir", type=str, required=True, 
                         help="Path to the file to save the tensor dictionary")
     args = parser.parse_args()
 
@@ -50,8 +51,10 @@ if __name__ == "__main__":
     model = AsymmetricCroCo3DStereo.from_pretrained(model_name).to(device)
     # load_images can take a list of images or a directory
     # images = load_images(["croco/assets/Chateau1.png", "croco/assets/Chateau2.png"], size=512)
-    imdir = args.input_dir
-    images = load_images(imdir, size=512)
+    imdir = Path(args.input_dir)
+    outdir = Path(f"results/{imdir.name}-reconstr")
+    outdir.mkdir(exist_ok=True, parents=True)
+    images = load_images(str(imdir), size=512)
     pairs = make_pairs(images, scene_graph="complete", prefilter=None, symmetrize=True)
     output = inference(pairs, model, device, batch_size=batch_size)
 
@@ -81,8 +84,7 @@ if __name__ == "__main__":
     focals = scene.get_focals()
     poses = scene.get_im_poses()
     pts3d = scene.get_pts3d()
-    save_dust3r_outs(focals, poses, pts3d, savepath=os.path.join(imdir, "dust3r_output/dust3r_out.pth"))
-    breakpoint()
+    save_dust3r_outs(focals, poses, pts3d, savepath=outdir / "dust3r_out.pth")
     confidence_masks = scene.get_masks()
 
     # visualize reconstruction
