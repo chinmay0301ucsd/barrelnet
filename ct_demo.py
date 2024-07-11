@@ -31,6 +31,7 @@ def save_dust3r_outs(focals, poses, pts3d, savepath):
     os.makedirs(os.path.dirname(savepath), exist_ok=True)
     torch.save(out_dict, savepath)
     print(f"Saved Dust3r outputs to {savepath}")
+    return out_dict
 
 
 if __name__ == "__main__":
