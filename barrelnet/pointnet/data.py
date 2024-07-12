@@ -122,6 +122,23 @@ def normalize_pc(valid_pts):
     pts = pts / scale
     return pts, scale 
 
+
+def pts2inference_format(points, max_points=1000):
+    """ Convert pts in the right format for input to pointnet
+    Args:
+        points: [N,3] torch tensor
+
+    Returns:
+        pts [1,N,3]
+        scale 
+    """
+    pts, scale = normalize_pc(points)
+    pts = pad_point_cloud(pts, max_points)
+    pts = pts.permute(1,0)
+    pts = pts.unsqueeze(0)
+    return pts, scale
+
+
 class CylinderData(Dataset):
 	def __init__(self, num_poses=10000, num_surface_samples=3000, max_points=1000, transform=None, max_burial_percent=0.7, noise_level=0.0):
 		"""
@@ -207,11 +224,13 @@ class CylinderData(Dataset):
 			sample: (data, label) pair for the given index
 		"""
 		pts = self.pad_point_cloud(self.pts[idx])
-		sample = {'pts': pts.permute(1,0),
-            	  'scale_gt': self.scales[idx],
-               	  'radius_gt': self.radii[idx],
-                  'axis_vec': self.normals[idx],
-                  'burial_z': self.burial_offsets[idx]}
+		sample = {
+			'pts': pts.permute(1,0),
+			'scale_gt': self.scales[idx],
+			'radius_gt': self.radii[idx],
+			'axis_vec': self.normals[idx],
+			'burial_z': self.burial_offsets[idx]
+		}
 
 		if self.transform:
 			sample['pts'] = self.transform(sample['pts'])

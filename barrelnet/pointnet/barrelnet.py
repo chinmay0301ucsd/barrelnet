@@ -26,6 +26,7 @@ class BarrelNet(nn.Module):
     def forward(self, x):
         xn, _, _ = self.feat_normal(x)
         xr, _, _ = self.feat_radius(x)
+        # x = xn
         x = (xn + xr)/2# in future make it (xn + xr)/2
         x = F.relu(self.bn1(self.fc1(x)))
         x = F.relu(self.bn2(self.dropout(self.fc2(x))))
