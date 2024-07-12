@@ -4,6 +4,7 @@ import sys
 from typing import List
 
 import dataclass_array as dca
+import numpy as np
 from PIL import Image
 import torch
 import visu3d as v3d
@@ -45,18 +46,24 @@ def resize_to_dust3r(img, size, square_ok=False, verbose=True):
     return img
 
 
-def save_dust3r_outs(focals, poses, pts3d, savepath):
-    """ Code to save output of dust3r after global alignment into a dictionary
+def save_dust3r_outs(scene, savepath):
+    """
+    Code to save output of dust3r after global alignment into a dictionary
+    
     Args: 
-        focals (torch.Tensor): Optimized Focal length of the N cameras [N,1]
-        poses (torch.Tensor): Optimized Camera Poses [N,4,4]
-        pts3d list of (torch.Tensor): Point clouds as seen from each camera. 
+        scene: Output of `global_aligner`
+    
     Returns:
-        None
+        dict
         saves a .pth file, can be loaded using torch.load()
     """
+    imgs = scene.imgs
+    focals = scene.get_focals()  # Optimized Focal length of the N cameras [N,1]
+    poses = scene.get_im_poses()  # Optimized Camera Poses [N,4,4]
+    pts3d = scene.get_pts3d()  # Point clouds as seen from each camera. 
     out_dict = {}
     pts3d = [pts.cpu().detach() for pts in pts3d]
+    out_dict["imgs"] = imgs  # list of np arrays, not tensors
     out_dict["focals"] = focals.cpu().detach()
     out_dict["poses"] = poses.cpu().detach()
     out_dict["pts3d"] = pts3d
@@ -66,14 +73,26 @@ def save_dust3r_outs(focals, poses, pts3d, savepath):
     return out_dict
 
 
-def read_dust3r(path, W, H):
+def read_dust3r(path):
+    """
+    Reads dust3r pickled dictionary.
+
+    Returns:
+        pts_final: torch.Tensor, [N*P, 3]
+        pts_each: List of torch.Tensor, [P, 3]
+        v3dcams: List of visu3d.Camera
+    """
     outs = torch.load(path)
+    H, W, _ = outs["imgs"][0].shape
     # points separated by camera
     pts_each = []
+    cols_each = []
     # concatenated points
     pts_final = []
+    cols_final = []
     v3dcams: List[v3d.Camera] = []
     for i in range(len(outs["poses"])):
+        imguint8 = (outs["imgs"][i] * 255).astype(np.uint8)
         f = outs["focals"][i, 0].numpy()
         cam_spec = v3d.PinholeCamera.from_focal(
             resolution=(H, W),
@@ -85,12 +104,17 @@ def read_dust3r(path, W, H):
         pts = outs["pts3d"][i]
         # pts = outs["pts3d"][i]@R.T + t 
         pts_each.append(pts.numpy().reshape(-1, 3))
+        cols_each.append(imguint8.reshape(-1, 3))
         pts_final.append(pts)
+        cols_final.append(imguint8)
         v3dcam = v3d.Camera(
             spec=cam_spec,
             world_from_cam=v3d.Transform.from_matrix(T)
         )
         v3dcams.append(v3dcam)
     v3dcams = dca.stack(v3dcams)
-    pts_final = torch.stack(pts_final).view(-1,3).numpy()
-    return pts_final, pts_each, v3dcams
+    pts_final = torch.stack(pts_final).view(-1, 3).numpy()
+    cols_final = np.stack(cols_final).reshape(-1, 3)
+    pcs_each = [v3d.Point3d(p=pts, rgb=cols) for pts, cols in zip(pts_each, cols_each)]
+    pc_final = v3d.Point3d(p=pts_final, rgb=cols_final)
+    return pc_final, pcs_each, v3dcams
