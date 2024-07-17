@@ -5,7 +5,7 @@ from torch.utils.data import Dataset, DataLoader
 import numpy as np
 import trimesh
 from scipy.spatial.transform import Rotation as R
-
+from barrelnet.pointnet.occlusion import *
 
 def pad_point_cloud(point_cloud, max_points=1000):
 	"""
@@ -76,6 +76,10 @@ def rotate_to_axis(point_cloud, axis, device='cuda'):
     
     return point_cloud_rotated
 
+def prepare_occluded_point_cloud():
+    "function to create pointcloud as seen by a camera view (occluded)"
+    pass
+
 def prepare_point_cloud(points, normal, hr_ratio_range=[1/4, 1/2], max_burial_percent=0.7):
     ## TODO : Maybe Subsume this in the point cloud class 
     """
@@ -117,7 +121,7 @@ def normalize_pc(valid_pts):
     """
     ## Point Cloud Prep for Feeding it to pointnet 
     ## Estimating the scale that needs to be given to the point cloud as input
-    pts = valid_pts - valid_pts.mean(dim=1, keepdim=True)
+    pts = valid_pts - valid_pts.mean(dim=0, keepdim=True)
     scale = torch.max(torch.linalg.norm(pts, dim=-1, keepdim=True), dim=0).values.item()
     pts = pts / scale
     return pts, scale 
@@ -140,6 +144,105 @@ def pts2inference_format(points, max_points=1000):
 
 
 class CylinderData(Dataset):
+	def __init__(self, num_poses=10000, num_surface_samples=3000, max_points=1000, transform=None, max_burial_percent=0.7, noise_level=0.0):
+		"""
+		Args:
+			num_poses : number of axis vectors to sample 
+			num_surface_samples : number of points on the surface of the cylinder to sample
+			max_points : maximum number of points in a batch of the point cloud
+			transform (callable, optional) : Optional transform to be applied
+				on a sample.
+		"""
+		self.points = generate_cylinder_pts(1.0, 1.0, num_pts=num_surface_samples, noise_level=noise_level)
+		self.max_points = max_points
+		self.normals = self.sample_normals(num_poses)
+		self.radii = []
+		self.burial_offsets = []
+		self.scales = []
+		self.pts = []
+
+		## TODO: Later remove this for loop, and make this one shot.
+		for i in tqdm(range(num_poses)):
+			valid_pts, radius, burial_offset = prepare_point_cloud(self.points, self.normals[i], max_burial_percent=max_burial_percent)
+			if valid_pts.shape[0] <=0:
+				continue
+			pts, scale = normalize_pc(valid_pts)
+			self.radii.append(radius)
+			self.burial_offsets.append(burial_offset)
+			self.scales.append(scale)
+			self.pts.append(pts)
+
+		self.radii = torch.stack(self.radii)
+		self.burial_offsets = torch.stack(self.burial_offsets)
+		self.scales = torch.tensor(self.scales)
+
+		self.transform = transform ## Adding noise etc
+
+	def pad_point_cloud(self, point_cloud):
+		"""
+		Pads the input point cloud with zeros to ensure it has exactly max_points.
+		Args:
+			point_cloud (torch.Tensor): The input point cloud tensor of shape (N, C).
+			max_points (int): The desired number of points in the output tensor.
+		Returns:
+			torch.Tensor: The padded point cloud tensor of shape (max_points, C).
+		"""
+		num_points, num_channels = point_cloud.shape
+		padded_cloud = torch.zeros((self.max_points, num_channels), dtype=point_cloud.dtype, device=point_cloud.device)
+		length = min(num_points, self.max_points)
+		perm_idx = torch.randperm(point_cloud.shape[0])
+		pc = point_cloud[perm_idx]
+		padded_cloud[:length, :] = pc[:length, :]
+		return padded_cloud
+
+	def sample_normals(self, num_samples, device='cuda'):
+		"""
+		Sample random unit vectors uniformly distributed on the upper hemisphere.
+		
+		Args:
+			num_samples (int): Number of unit vectors to sample.
+			device (str): Device to perform the computation ('cpu' or 'cuda').
+			
+		Returns:
+			torch.Tensor: Tensor of shape (num_samples, 3) containing the sampled unit vectors.
+		"""
+		phi = torch.rand(num_samples, device=device) * 2 * torch.pi
+		theta = torch.acos(torch.rand(num_samples, device=device))
+
+		x = torch.sin(theta) * torch.cos(phi)
+		y = torch.sin(theta) * torch.sin(phi)
+		z = torch.cos(theta)
+
+		return torch.stack((x, y, z), dim=1)
+	
+	def __len__(self):
+		"""Returns the total number of samples"""
+		return len(self.pts)
+
+	def __getitem__(self, idx):
+		"""
+		Args:
+			idx (int): Index
+
+		Returns:
+			sample: (data, label) pair for the given index
+		"""
+		pts = self.pad_point_cloud(self.pts[idx])
+		sample = {
+			'pts': pts.permute(1,0),
+			'scale_gt': self.scales[idx],
+			'radius_gt': self.radii[idx],
+			'axis_vec': self.normals[idx],
+			'burial_z': self.burial_offsets[idx]
+		}
+
+		if self.transform:
+			sample['pts'] = self.transform(sample['pts'])
+
+		return sample
+
+
+class CylinderDataOccluded(Dataset):
 	def __init__(self, num_poses=10000, num_surface_samples=3000, max_points=1000, transform=None, max_burial_percent=0.7, noise_level=0.0):
 		"""
 		Args:
