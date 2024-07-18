@@ -61,8 +61,8 @@ def get_local_plane_mask(bbox, expandratio_in, expandratio_out, W, H):
     """
     newbboxout = np.zeros(4, dtype=int)
     newbboxin = np.zeros(4, dtype=int)
-    expandratioin = 1.1
-    expandratioout = 1.6
+    expandratioin = expandratio_in
+    expandratioout = expandratio_out
     width = bbox[2] - bbox[0]
     height = bbox[3] - bbox[1]
     cx = bbox[0] + width // 2
@@ -78,10 +78,10 @@ def get_local_plane_mask(bbox, expandratio_in, expandratio_out, W, H):
     return get_bbox_mask(newbboxout, W, H) - get_bbox_mask(newbboxin, W, H)
 
 
-def rotate_pts_to_ax(pts, normal, target):
+def rotate_pts_to_ax(pts, normal, target, ret_R=False):
     normal = np.array(normal, dtype=float)
     target = np.array(target, dtype=float)
-    ang = np.arccos((target @ normal)/(np.linalg.norm(target)*np.linalg.norm(normal)))
+    ang = np.arccos((target @ normal) / (np.linalg.norm(target) * np.linalg.norm(normal)))
     rotax = np.cross(normal, target)
     eta = (rotax / np.linalg.norm(rotax))
     theta = eta * ang
@@ -92,6 +92,8 @@ def rotate_pts_to_ax(pts, normal, target):
     ])
     R = np.eye(3) + (np.sin(ang) / ang) * thetahat + ((1 - np.cos(ang)) / ang**2) * (thetahat @ thetahat)
     rotscenexyz = (R @ pts.T).T
+    if ret_R:
+        return rotscenexyz, R
     return rotscenexyz
 
 
