@@ -112,7 +112,7 @@ def read_dust3r(path):
             world_from_cam=v3d.Transform.from_matrix(T)
         )
         v3dcams.append(v3dcam)
-    v3dcams = dca.stack(v3dcams)
+    v3dcams: v3d.Camera = dca.stack(v3dcams)
     pts_final = torch.stack(pts_final).view(-1, 3).numpy()
     cols_final = np.stack(cols_final).reshape(-1, 3)
     pcs_each = [v3d.Point3d(p=pts, rgb=cols) for pts, cols in zip(pts_each, cols_each)]
