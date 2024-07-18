@@ -322,8 +322,8 @@ class CylinderDataOccluded(Dataset):
 				points, relative_burial = render_occluded_point_cloud(self.axisvecs[i][j], self.camera_fov, self.imsize,
 															self.radii[i][j], height, origin, self.burial_percentages[i][j], self.renderer)
 				noise = torch.randn_like(points).cuda() * self.noise_level
-    			points = points + noise
-    			cam_pts.append(points.cpu())
+				points = points + noise
+				cam_pts.append(points.cpu())
 				self.burial_offsets.append(relative_burial)
 			self.pts += cam_pts
 		self.radii = torch.from_numpy(self.radii).float()
