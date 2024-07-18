@@ -3,9 +3,14 @@ from tqdm import tqdm
 import roma
 from torch.utils.data import Dataset, DataLoader
 import numpy as np
+import pickle
 import trimesh
+import pyrender
 from scipy.spatial.transform import Rotation as R
 from barrelnet.pointnet.occlusion import *
+import os 
+import gc
+os.environ['PYOPENGL_PLATFORM'] = 'egl'
 
 def pad_point_cloud(point_cloud, max_points=1000):
 	"""
@@ -76,9 +81,7 @@ def rotate_to_axis(point_cloud, axis, device='cuda'):
     
     return point_cloud_rotated
 
-def prepare_occluded_point_cloud():
-    "function to create pointcloud as seen by a camera view (occluded)"
-    pass
+
 
 def prepare_point_cloud(points, normal, hr_ratio_range=[1/4, 1/2], max_burial_percent=0.7):
     ## TODO : Maybe Subsume this in the point cloud class 
@@ -111,21 +114,37 @@ def prepare_point_cloud(points, normal, hr_ratio_range=[1/4, 1/2], max_burial_pe
     return valid_pts, radius, burial_z
 
 def normalize_pc(valid_pts):
-    """
-    Normalize the point cloud to feed in to point net. Also estimate the scaling factor. 
-    Args:
-		valid_pts (torch.tensor) N,C - Point Cloud 
-    Returns:
+	"""
+	Normalize standard N,C point clouds
+	Args:
+		valid_pts (torch.tensor) N,C - Point Cloud (batch, num_channels, num_pts) 
+	Returns:
 		pts (torch.tensor) N,C normalized Point Cloud 
 		scale (float) - value with which to divide the actual radius, for input to network.
-    """
-    ## Point Cloud Prep for Feeding it to pointnet 
-    ## Estimating the scale that needs to be given to the point cloud as input
-    pts = valid_pts - valid_pts.mean(dim=0, keepdim=True)
-    scale = torch.max(torch.linalg.norm(pts, dim=-1, keepdim=True), dim=0).values.item()
-    pts = pts / scale
-    return pts, scale 
+	"""
+	## Point Cloud Prep for Feeding it to pointnet 
+	## Estimating the scale that needs to be given to the point cloud as input
+	pts = valid_pts - valid_pts.mean(dim=0, keepdim=True)
+	scale = torch.max(torch.linalg.norm(pts, dim=-1, keepdim=True), dim=0).values.item()
+	pts = pts / scale
+	return pts, scale 
 
+def normalize_pc_train(pts):
+	"""
+	Normalize the point cloud B,C,N to feed in to point net. Also estimate the scaling factor. 
+	Args:
+		pts (torch.tensor) B,C,N - Point Cloud (batch, num_channels, num_pts) 
+	Returns:
+		pts (torch.tensor) B,C,N normalized Point Cloud 
+		scale (float) (B,1,1) - value with which to divide the actual radius, for input to network.
+	"""
+	## Point Cloud Prep for Feeding it to pointnet 
+	## Estimating the scale that needs to be given to the point cloud as input
+	pts = pts - pts.mean(dim=-1, keepdim=True)
+	scale = torch.max(torch.linalg.norm(pts, dim=1, keepdim=True), dim=-1, keepdim=True).values
+	pts = pts / scale
+	return pts, scale.squeeze(-1).squeeze(-1)
+    
 
 def pts2inference_format(points, max_points=1000):
     """ Convert pts in the right format for input to pointnet
@@ -133,7 +152,7 @@ def pts2inference_format(points, max_points=1000):
         points: [N,3] torch tensor
 
     Returns:
-        pts [1,N,3]
+        pts [1,3,N]
         scale 
     """
     pts, scale = normalize_pc(points)
@@ -243,7 +262,10 @@ class CylinderData(Dataset):
 
 
 class CylinderDataOccluded(Dataset):
-	def __init__(self, num_poses=10000, num_surface_samples=3000, max_points=1000, transform=None, max_burial_percent=0.7, noise_level=0.0):
+	def __init__(self, num_poses=10000, max_points=1000, max_burial_percent=0.7,
+                 noise_level=0.03, camera_radius_range=[1.5, 6.0], hr_ratio_range=[1/4, 1/2],
+                 theta_range=[0.18*np.pi, 0.41*np.pi], cam_views_per_pose=20, camera_fov=np.pi/3,
+                 imsize=[512,512], dataset_loaddir=None, dataset_savedir='barrelsynth_data/', **kwargs):
 		"""
 		Args:
 			num_poses : number of axis vectors to sample 
@@ -252,31 +274,71 @@ class CylinderDataOccluded(Dataset):
 			transform (callable, optional) : Optional transform to be applied
 				on a sample.
 		"""
-		self.points = generate_cylinder_pts(1.0, 1.0, num_pts=num_surface_samples, noise_level=noise_level)
+		self.num_poses = num_poses
 		self.max_points = max_points
-		self.normals = self.sample_normals(num_poses)
+		self.theta_range = theta_range 
+		self.camera_radius_range = camera_radius_range
+		self.cam_views_per_pose = cam_views_per_pose
+		self.camera_fov = camera_fov
+		self.imsize = imsize
+		self.hr_ratio_range = hr_ratio_range
+		self.noise_level = noise_level
+		self.max_burial_percent = max_burial_percent
+		self.dataset_load_file = os.path.join(dataset_loaddir, 'data.pkl') if dataset_loaddir is not None else None
+		self.dataset_save_file = os.path.join(dataset_savedir, 'data.pkl')if dataset_savedir is not None else None
+		self.renderer = pyrender.OffscreenRenderer(imsize[0], imsize[1])
+
+		os.makedirs(dataset_savedir, exist_ok=True)
+
+		if self.dataset_load_file is not None:
+			with open(self.dataset_load_file, 'rb') as f:
+				data_dict = pickle.load(f)
+				self.axisvecs = data_dict['axis_vectors']
+				self.radii = data_dict['radii']
+				self.burial_offsets = data_dict['burial_offsets']
+				self.pts = data_dict['pts']
+		else:
+			self.generate_dataset()
+
+	def generate_dataset(self):
 		self.radii = []
 		self.burial_offsets = []
 		self.scales = []
 		self.pts = []
 
-		## TODO: Later remove this for loop, and make this one shot.
-		for i in tqdm(range(num_poses)):
-			valid_pts, radius, burial_offset = prepare_point_cloud(self.points, self.normals[i], max_burial_percent=max_burial_percent)
-			if valid_pts.shape[0] <=0:
-				continue
-			pts, scale = normalize_pc(valid_pts)
-			self.radii.append(radius)
-			self.burial_offsets.append(burial_offset)
-			self.scales.append(scale)
-			self.pts.append(pts)
+		height = 1.0 
+		self.axisvecs = self.sample_normals(self.num_poses).cpu().numpy()
+		self.radii = np.random.uniform(self.hr_ratio_range[0], self.hr_ratio_range[1], self.num_poses)*height
+		self.burial_percentages = np.random.uniform(-self.max_burial_percent, self.max_burial_percent, self.num_poses)
 
-		self.radii = torch.stack(self.radii)
-		self.burial_offsets = torch.stack(self.burial_offsets)
-		self.scales = torch.tensor(self.scales)
+		self.radii = np.expand_dims(self.radii, axis=-1).repeat(axis=-1, repeats=self.cam_views_per_pose)
+		self.axisvecs = np.expand_dims(self.axisvecs, axis=1).repeat(axis=1, repeats=self.cam_views_per_pose) #num_poses x cam_per_view x 3
+		self.burial_percentages = np.expand_dims(self.burial_percentages, axis=-1).repeat(axis=-1, repeats=self.cam_views_per_pose)
+		self.burial_offsets = []
+		for i in tqdm(range(self.num_poses)):
+			cam_origins = self.sample_camera_views()
+			cam_pts = []
+			for j, origin in enumerate(cam_origins):
+				points, relative_burial = render_occluded_point_cloud(self.axisvecs[i][j], self.camera_fov, self.imsize,
+															self.radii[i][j], height, origin, self.burial_percentages[i][j], self.renderer)
+				cam_pts.append(points.cpu())
+				self.burial_offsets.append(relative_burial)
+			self.pts += cam_pts
+		self.radii = torch.from_numpy(self.radii).float()
+		self.burial_offsets = torch.from_numpy(np.array(self.burial_offsets)).float()
+		## Saving things to a pickle 
+		self.renderer.delete()
+		gc.collect()
 
-		self.transform = transform ## Adding noise etc
-
+		with open(self.dataset_save_file, 'wb') as f:
+			datadict = {} 
+			datadict['axis_vectors'] = self.axisvecs.reshape(-1,3)
+			datadict['radii'] = self.radii.flatten()
+			datadict['burial_offsets'] = self.burial_offsets.flatten()
+			datadict['pts'] = self.pts
+			pickle.dump(datadict, f)
+			print("Saved dataset")
+		
 	def pad_point_cloud(self, point_cloud):
 		"""
 		Pads the input point cloud with zeros to ensure it has exactly max_points.
@@ -309,13 +371,21 @@ class CylinderDataOccluded(Dataset):
 		theta = torch.acos(torch.rand(num_samples, device=device))
 
 		x = torch.sin(theta) * torch.cos(phi)
-		y = torch.sin(theta) * torch.sin(phi)
-		z = torch.cos(theta)
-
+		z = torch.sin(theta) * torch.sin(phi)
+		y = torch.cos(theta)
 		return torch.stack((x, y, z), dim=1)
 	
+	def sample_camera_views(self):
+		""" Returns Camera origins (np.array) [num_views,3] around the ocean floor. theta - angle from Y axis, phi angle on XZ plane """
+		theta_range, radius_range, num_views = self.theta_range, self.camera_radius_range, self. cam_views_per_pose
+		theta = np.random.uniform(theta_range[0], theta_range[1], num_views)
+		r = np.random.uniform(radius_range[0], radius_range[1], num_views)
+		phi = np.random.uniform(0, 2*np.pi, num_views)
+		cam_origins = np.stack([r*np.sin(theta)*np.cos(phi), r*np.cos(theta), r*np.sin(theta)*np.sin(phi)]).T
+		return cam_origins
+
 	def __len__(self):
-		"""Returns the total number of samples"""
+		""" Returns the total number of samples """
 		return len(self.pts)
 
 	def __getitem__(self, idx):
@@ -329,13 +399,8 @@ class CylinderDataOccluded(Dataset):
 		pts = self.pad_point_cloud(self.pts[idx])
 		sample = {
 			'pts': pts.permute(1,0),
-			'scale_gt': self.scales[idx],
 			'radius_gt': self.radii[idx],
-			'axis_vec': self.normals[idx],
+			'axis_vec': self.axisvecs[idx],
 			'burial_z': self.burial_offsets[idx]
 		}
-
-		if self.transform:
-			sample['pts'] = self.transform(sample['pts'])
-
 		return sample

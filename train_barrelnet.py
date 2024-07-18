@@ -10,12 +10,13 @@ from torch.utils.tensorboard import SummaryWriter
 import uuid
 import yaml
 import roma
-from data import generate_cylinder_pts, prepare_point_cloud, normalize_pc, CylinderData
+from barrelnet.pointnet.data import generate_cylinder_pts, prepare_point_cloud, normalize_pc, normalize_pc_train
 from mpl_toolkits.mplot3d import Axes3D
 from torch.utils.data import Dataset, DataLoader
 
 from barrelnet.pointnet.pointnet_utils import PointNetEncoder, feature_transform_reguliarzer
 from barrelnet.pointnet.barrelnet import BarrelNet
+from barrelnet.pointnet.data import CylinderDataOccluded
 
 def load_config(config_file):
     with open(config_file, 'r') as file:
@@ -25,9 +26,8 @@ def load_config(config_file):
 def compute_loss(sample, radius_pred, zshift_pred, axis_pred, use_radius_loss=True, use_axis_loss=True, use_loss_zshift=True):
     """ Compute loss on the predictions of pointnet """
     assert use_axis_loss or use_radius_loss, "Atleast one of the losses should be used"
-    loss_axis = (1 - F.cosine_similarity(sample['axis_vec'], axis_pred, dim=1)).mean()
-    scale = sample['scale_gt']
-    loss_radius = F.mse_loss(radius_pred, sample['radius_gt'].cuda() / scale.cuda())
+    loss_axis = (1 - F.cosine_similarity(sample['axis_vec'].cuda(), axis_pred, dim=1)).mean()
+    loss_radius = F.mse_loss(radius_pred, sample['radius_gt'].cuda())
     loss_zshift = F.mse_loss(zshift_pred, sample['burial_z'].cuda())
     loss = 0.0 
     if use_radius_loss:
@@ -38,34 +38,37 @@ def compute_loss(sample, radius_pred, zshift_pred, axis_pred, use_radius_loss=Tr
         loss = loss + loss_zshift
     return loss, loss_radius, loss_axis, loss_zshift
 
-def train(model, train_loader, optimizer, scheduler, writer, num_epochs=5000, save_epoch=1000, test_epoch=1000, save_dir='weights/r0'):
+def train(model, train_loader, optimizer, scheduler, writer, config=None):
     """ 
     ## TODO: Too many train config parameters. Pass them as a dictionary through a yaml file or something.
 	Train the model for num_epochs
 	model : BarrelNet Model instance 
     """
     ## Parsing config params
+    save_dir = config['save_dir']
     num_epochs = config['train']['num_epochs']
     save_epoch = config['train']['save_epoch']
     test_epoch = config['train']['test_epoch']
     
     os.makedirs(save_dir, exist_ok=True)
     model.train()  # Set model to training mode
+    print("Starting training")
     for epoch in range(num_epochs):
         running_loss = 0.0
         running_loss_radius = 0.0
         running_loss_axis = 0.0
         running_loss_zshift = 0.0
-        for i, sample in enumerate(train_loader):
+        for i, sample in tqdm(enumerate(train_loader)):
             # Zero the parameter gradients
             optimizer.zero_grad()
             
             # Forward pass
-            radius_pred, zshift_pred, axis_pred = model(sample['pts'])
-            loss, loss_radius, loss_axis, loss_zshift = compute_loss(sample, radius_pred, zshift_pred, axis_pred,
+            pts = sample['pts']
+            input, scale = normalize_pc_train(pts.cuda())
+            radius_pred, zshift_pred, axis_pred = model(input)
+            loss, loss_radius, loss_axis, loss_zshift = compute_loss(sample, radius_pred*scale, zshift_pred, axis_pred,
                                                                      use_radius_loss=True, use_axis_loss=True,
                                                                      use_loss_zshift=True)
-            
             # Backward pass and optimize
             loss.backward()
             optimizer.step()
@@ -82,7 +85,7 @@ def train(model, train_loader, optimizer, scheduler, writer, num_epochs=5000, sa
         
         # Step the scheduler at the end of each epoch
         scheduler.step()
-        if epoch % 50 == 0:
+        if epoch % 5 == 0:
             print(f'Epoch [{epoch + 1}/{num_epochs}], Loss: {running_loss / len(train_loader)}, LR: {scheduler.get_last_lr()[0]}')
 
         if epoch % save_epoch == 0:
@@ -100,9 +103,11 @@ def test(model, test_loader, writer, epoch=0):
     criterion_cosine = nn.CosineSimilarity(dim=1)
     for sample in tqdm(test_loader):
         with torch.no_grad():
-            radius_pred, zshift_pred, axis_pred = model(sample['pts'])
-            radius_pred = radius_pred * sample['scale_gt'].cuda()
-            acc_axis = (1 + criterion_cosine(sample['axis_vec'], axis_pred).mean())/2
+            pts = sample['pts']
+            input, scale = normalize_pc_train(pts.cuda())
+            radius_pred, zshift_pred, axis_pred = model(input)
+            radius_pred = radius_pred * scale
+            acc_axis = (1 + criterion_cosine(sample['axis_vec'].cuda(), axis_pred).mean())/2
             acc_radius = torch.abs(radius_pred - sample['radius_gt'].cuda())
             acc_zshift = torch.abs(zshift_pred - sample['burial_z'].cuda())
             
@@ -116,34 +121,26 @@ def test(model, test_loader, writer, epoch=0):
         
 
 if __name__=="__main__":
-	config = load_config('configs/config.yaml')
+	config = load_config('/home/ubuntu/dust3r/configs/config.yaml')
 	dirname = str(uuid.uuid4()).replace('-', '')[:6]
 	save_dir = os.path.join('logs', dirname, 'weights')
+	config['save_dir'] = save_dir
 	os.makedirs(save_dir, exist_ok=True)
 
 	writer = SummaryWriter(f'logs/{dirname}')
-	train_data = CylinderData(num_poses=config['data']['num_train_poses'],
-							noise_level=config['data']['noise_level'],
-							max_points=config['data']['max_points'],
-							num_surface_samples=config['data']['num_surface_samples'],
-							max_burial_percent=config['data']['max_burial_percent'])
-
-	test_data = CylinderData(num_poses=config['data']['num_test_poses'],
-							noise_level=config['data']['noise_level'],
-							max_points=config['data']['max_points'],
-							num_surface_samples=config['data']['num_surface_samples'],
-							max_burial_percent=config['data']['max_burial_percent'])
-
+ 
+	train_data = CylinderDataOccluded(dataset_loaddir=config['data']['train_dir'])
+	test_data = CylinderDataOccluded(dataset_loaddir=config['data']['test_dir'])
 
 
 	train_loader = DataLoader(train_data, batch_size=32, shuffle=True)
-	test_loader = DataLoader(test_data, batch_size=1, shuffle=False)
+	test_loader = DataLoader(test_data, batch_size=1, shuffle=True)
 
 	pointnet = BarrelNet(k=5, normal_channel=False).cuda()
 	pointnet.train()
-
 	optimizer = optim.Adam(pointnet.parameters(), lr=config['optimizer']['lr'])
-	scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=config['optimizer']['step_size'], gamma=config['optimizer']['gamma'])
+	scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=config['optimizer']['step_size'],
+                                          gamma=config['optimizer']['gamma'])
 
 	with open(os.path.join('logs',dirname,'cfg.yaml'), 'w') as file:
 		yaml.safe_dump(config, file)

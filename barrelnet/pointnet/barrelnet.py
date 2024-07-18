@@ -33,7 +33,7 @@ class BarrelNet(nn.Module):
         x = self.fc3(x)
         radius = F.sigmoid(x[:,3])    
         zshift = F.tanh(x[:,4]) * 0.5    
-        normal = torch.concatenate([F.tanh(x[:,:2]), F.sigmoid(x[:,2:3])], dim=1)
+        normal = torch.concatenate([F.tanh(x[:,:1]), F.sigmoid(x[:,1:2]), F.tanh(x[:,2:3])], dim=1)
         normal = normal / torch.linalg.norm(normal, dim=-1, keepdim=True)
         return radius, zshift, normal 
     
