@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import torch
 from tqdm import tqdm
 import roma
@@ -262,10 +264,12 @@ class CylinderData(Dataset):
 
 
 class CylinderDataOccluded(Dataset):
-	def __init__(self, num_poses=10000, max_points=1000, max_burial_percent=0.7,
-                 noise_level=0.03, camera_radius_range=[1.5, 6.0], hr_ratio_range=[1/4, 1/2],
-                 theta_range=[0.18*np.pi, 0.41*np.pi], cam_views_per_pose=20, camera_fov=np.pi/3,
-                 imsize=[512,512], dataset_loaddir=None, dataset_savedir='barrelsynth_data/', **kwargs):
+	def __init__(
+		self, num_poses=10000, max_points=1000, max_burial_percent=0.7,
+		noise_level=0.03, camera_radius_range=[1.5, 6.0], hr_ratio_range=[1/4, 1/2],
+		theta_range=[0.18*np.pi, 0.41*np.pi], cam_views_per_pose=20, camera_fov=np.pi/3,
+		imsize=[512,512], dataset_loadpath=None, dataset_savepath=None
+	):
 		"""
 		Args:
 			num_poses : number of axis vectors to sample 
@@ -284,11 +288,11 @@ class CylinderDataOccluded(Dataset):
 		self.hr_ratio_range = hr_ratio_range
 		self.noise_level = noise_level
 		self.max_burial_percent = max_burial_percent
-		self.dataset_load_file = os.path.join(dataset_loaddir, 'data.pkl') if dataset_loaddir is not None else None
-		self.dataset_save_file = os.path.join(dataset_savedir, 'data.pkl')if dataset_savedir is not None else None
+		self.dataset_load_file: Path = Path(dataset_loadpath) if dataset_loadpath is not None else None
+		self.dataset_save_file: Path = Path(dataset_savepath) if dataset_savepath is not None else Path("barrelsynth_data", "data.pkl")
 		self.renderer = pyrender.OffscreenRenderer(imsize[0], imsize[1])
 
-		os.makedirs(dataset_savedir, exist_ok=True)
+		self.dataset_save_file.parent.mkdir(parents=True, exist_ok=True)
 
 		if self.dataset_load_file is not None:
 			with open(self.dataset_load_file, 'rb') as f:
