@@ -1,4 +1,4 @@
-num_poses: 1
+num_poses: 1000
 max_points: 1000
 max_burial_percent: 0.7
 noise_level: 0.01

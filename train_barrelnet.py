@@ -129,8 +129,8 @@ if __name__=="__main__":
 
 	writer = SummaryWriter(f'logs/{dirname}')
  
-	train_data = CylinderDataOccluded(dataset_loaddir=config['data']['train_dir'])
-	test_data = CylinderDataOccluded(dataset_loaddir=config['data']['test_dir'])
+	train_data = CylinderDataOccluded(dataset_loadpath=config['data']['train_dir'])
+	test_data = CylinderDataOccluded(dataset_loadpath=config['data']['test_dir'])
 
 
 	train_loader = DataLoader(train_data, batch_size=32, shuffle=True)

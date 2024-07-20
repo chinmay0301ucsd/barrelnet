@@ -409,6 +409,6 @@ class CylinderDataOccluded(Dataset):
             'pts': pts.permute(1,0),
             'radius_gt': self.radii[idx],
             'axis_vec': self.axisvecs[idx],
-            'burial_z': self.burial_offsets[idx]
+            'burial_z': self.burial_offsets[idx] # TODO: Replace this name to burial_y 
         }
         return sample

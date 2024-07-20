@@ -10,8 +10,8 @@ data:
   # cam_views_per_pose: 20
   # camera_fov: 1.047
   imsize: [512,512]
-  train_dir: 'barrelsynth_data/train_large_noise/'
-  test_dir: 'barrelsynth_data/test_large_noise/'
+  train_dir: 'barrelsynth_data/train_large_noise/data.pkl'
+  test_dir: 'barrelsynth_data/test_large_noise/data.pkl'
 
 train:
   num_epochs: 100
