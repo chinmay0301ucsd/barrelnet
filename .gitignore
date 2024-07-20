@@ -5,6 +5,8 @@ results/**
 checkpoints/**
 !checkpoints/.gitkeep
 
+scratch.ipynb
+
 ### JupyterNotebooks ###
 .ipynb_checkpoints
 */.ipynb_checkpoints/*

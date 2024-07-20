@@ -13,29 +13,32 @@ import gc
 os.environ['PYOPENGL_PLATFORM'] = 'egl'
 mi.set_variant('cuda_ad_rgb')
 
-def rotvec_to_matrix(axis, device='cuda'):
+def rotvec_to_matrix(target: torch.Tensor, device="cuda"):
     """
-    Rotate the point cloud to align its Y-axis with the given axis using PyTorch.
+    Creates a rotation matrix to rotate a point cloud oriented y-axis up to align with
+    a given axis using PyTorch.
     
     Args:
-        axis (torch.Tensor): Target axis to align with, should be of shape (3,).
+        axis (torch.Tensor): Target axis to rotate to, should be of shape (3,).
         device (str): Device to perform the computation ('cpu' or 'cuda').
     Returns:
-        torch.Tensor: Rotated point cloud of shape (N, 3).
+        torch.Tensor (3, 3): Rotation matrix to transform points from y-axis up to target axis.
     """
     ## TODO: make this batched, to rotate the point cloud to different configurations at once. 
     # Normalize the axis
-    axis = axis / torch.linalg.norm(axis)
-    z_axis = torch.tensor([0., 1., 0.], device='cuda')
-    rotation_vector = torch.cross(z_axis, axis)
-    angle = torch.arccos(torch.dot(z_axis, axis))
-    
+    target = target.to(device)
+    target = target / torch.norm(target)
+    y_axis = torch.tensor([0., 1., 0.], device=device)
+    rotation_vector = torch.cross(y_axis, target)
+    rotation_vector = rotation_vector / torch.norm(rotation_vector)
+    # angle = torch.arccos((y_axis @ target) / (torch.norm(y_axis) * torch.norm(target)))
+    angle = torch.arccos(torch.dot(y_axis, target))
+
     # Convert rotation vector and angle to a PyTorch tensor
-    rotation_vector = torch.tensor(rotation_vector, dtype=torch.float32, device=device)
-    angle = torch.tensor(angle, dtype=torch.float32, device=device)
-    
+    theta = rotation_vector * angle
+
     # Create the rotation matrix using torch-roma
-    rotation_matrix = roma.rotvec_to_rotmat(rotation_vector * angle)
+    rotation_matrix = roma.rotvec_to_rotmat(theta)
     return rotation_matrix
 
 def get_posed_split_cylinder_mesh(radius, height, axis, burial_percent = 0.5):
@@ -48,13 +51,13 @@ def get_posed_split_cylinder_mesh(radius, height, axis, burial_percent = 0.5):
     # Generate Cylinder Mesh and align it's axis with Y axis
     capped_cylinder = trimesh.creation.cylinder(radius=radius, height=height, sections=64, cap=True)
     capped_cylinder.apply_transform(trimesh.transformations.rotation_matrix(angle=np.pi/2, direction=[1, 0, 0]))
-    
+
     # Compute Rotation matrix to rotate cylinder to given axis
     axis = torch.from_numpy(axis).float().cuda()
     axis = axis / torch.linalg.norm(axis)
     rotmat = rotvec_to_matrix(axis).cpu().numpy()
     pose = np.eye(4)
-    pose[:3,:3] = rotmat
+    pose[:3, :3] = rotmat
     capped_cylinder.apply_transform(pose)
     
     #Compute Burial offset and bury cylinder by that much.
@@ -94,10 +97,6 @@ def pyrender_depth(renderer, HW, cyl_mesh, fov, cam_origin):
     K, RT = get_KRT(fov, HW, cam_origin)
     
     scene.add(camera, pose=RT)
-    light = pyrender.SpotLight(color=np.ones(3), intensity=0.5,
-                            innerConeAngle=np.pi/16.0,
-                            outerConeAngle=np.pi/6.0)
-    scene.add(light, pose=RT)
     color, depth = renderer.render(scene)
     return torch.from_numpy(depth).float().cuda(), K, torch.from_numpy(RT).float().cuda()
 

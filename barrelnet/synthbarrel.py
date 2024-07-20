@@ -114,16 +114,22 @@ def generate_oriented_barrel(r, h, npoints, sigma=0, zlims=None, includecap=True
     return points, points_all, cylax, heightchange
 
 
-def get_cyl_endpoints(cylax, h, z):
-    """Get axis endpoints of a cylinder based on centroid with z-axis at 0. Offset z input."""
+def get_cyl_endpoints(cylax, h, offset, axidx=2):
+    """
+    Get axis endpoints of a cylinder based on centroid with given axis up at 0.
+    
+    axidx is 0 (x), 1 (y), 2 (z) up
+    
+    Offset z input.
+    """
     cylax = cylax / np.linalg.norm(cylax)
     # force vector to point up
-    if cylax[2] < 0:
+    if cylax[axidx] < 0:
         cylax = -cylax
     x1 = -cylax * (h / 2)
-    x1[2] += z
+    x1[axidx] += offset
     x2 = cylax * (h / 2)
-    x2[2] += z
+    x2[axidx] += offset
     return x1, x2
 
 
