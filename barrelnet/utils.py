@@ -8,6 +8,7 @@ from matplotlib import cm
 import matplotlib.pyplot as plt
 import numpy as np
 import plotly.graph_objects as go
+from sklearn.neighbors import KDTree
 import torch
 import visu3d as v3d
 
@@ -158,3 +159,56 @@ def rotate_pts_to_ax_torch(pts, normal, target):
     R = torch.eye(3) + (torch.sin(ang) / ang) * thetahat + ((1 - torch.cos(ang)) / ang**2) * (thetahat @ thetahat)
     rotscenexyz = pts @ R.T
     return rotscenexyz
+
+
+def icp_translate(source_pc, target_pc, max_iters=20, tol=1e-3, verbose=False, ntheta=3, nphi=3):
+    """
+    Extremely jank implementation of iterative closest point for only translation.
+    
+    Initializes guesses of translation by sampling points on a sphere around the
+    target point cloud.
+    
+    source_pc assumed to be smaller than target_pc
+    """
+    src_mean = np.mean(source_pc, axis=0)
+    targ_mean = np.mean(target_pc, axis=0)
+    scale = np.max(np.linalg.norm(target_pc - targ_mean, axis=1))
+    src_cent = source_pc - src_mean
+    targ_cent = target_pc - targ_mean
+
+    src_kd = KDTree(source_pc)
+    target_kd = KDTree(target_pc)
+    thetas = np.linspace(0, 2 * np.pi, ntheta + 1)[:-1]
+    phis = np.linspace(0, np.pi, nphi + 2)[1:-1]
+    alltheta, allphi = np.meshgrid(thetas, phis)
+    alltheta = alltheta.reshape(-1)
+    allphi = allphi.reshape(-1)
+    offset_choices = scale * np.array([np.sin(allphi) * np.cos(alltheta), np.sin(allphi) * np.sin(alltheta), np.cos(allphi)]).T
+    alltranslations = np.zeros((len(alltheta), 3))
+    allmeandists = np.zeros(len(alltheta))
+    for j, offset in enumerate(offset_choices):
+        # p = targ_mean - src_mean
+        p = (targ_mean + offset) - src_mean
+        prevp = p
+        prevdist = np.inf
+        K = max_iters
+        for i in range(K):
+            dists, close_idxs = target_kd.query(source_pc + p)
+            meandist = np.mean(dists)
+            targ_mean_filt = np.mean(target_pc[close_idxs], axis=0)
+            p = targ_mean_filt - src_mean
+            if np.abs(prevdist - meandist) < tol:
+                if verbose:
+                    print(f"converged at iter {i}")
+                break
+            prevp = p
+            prevdist = meandist
+            if i == K - 1:
+                if verbose:
+                    print(f"max iters {K} reached before tolerance {tol}")
+        allmeandists[j] = np.mean(meandist)
+        alltranslations[j, :] = p
+    bestidx = np.argmin(allmeandists)
+    # pose = np.eye(4)
+    # pose[:3, 3] = alltranslations[bestidx]
+    return alltranslations[bestidx]
