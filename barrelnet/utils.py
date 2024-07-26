@@ -178,17 +178,23 @@ def icp_translate(source_pc, target_pc, max_iters=20, tol=1e-3, verbose=False, n
 
     src_kd = KDTree(source_pc)
     target_kd = KDTree(target_pc)
-    thetas = np.linspace(0, 2 * np.pi, ntheta + 1)[:-1]
-    phis = np.linspace(0, np.pi, nphi + 2)[1:-1]
-    alltheta, allphi = np.meshgrid(thetas, phis)
-    alltheta = alltheta.reshape(-1)
-    allphi = allphi.reshape(-1)
-    offset_choices = scale * np.array([np.sin(allphi) * np.cos(alltheta), np.sin(allphi) * np.sin(alltheta), np.cos(allphi)]).T
-    alltranslations = np.zeros((len(alltheta), 3))
-    allmeandists = np.zeros(len(alltheta))
+    if ntheta > 0 and nphi > 0:
+        thetas = np.linspace(0, 2 * np.pi, ntheta + 1)[:-1]
+        phis = np.linspace(0, np.pi, nphi + 2)[1:-1]
+        alltheta, allphi = np.meshgrid(thetas, phis)
+        alltheta = alltheta.reshape(-1)
+        allphi = allphi.reshape(-1)
+        offset_choices = scale * np.array([np.sin(allphi) * np.cos(alltheta), np.sin(allphi) * np.sin(alltheta), np.cos(allphi)]).T
+    else:
+        offset_choices = np.array([None])
+    alltranslations = np.zeros((len(offset_choices), 3))
+    allmeandists = np.zeros(len(offset_choices))
     for j, offset in enumerate(offset_choices):
         # p = targ_mean - src_mean
-        p = (targ_mean + offset) - src_mean
+        if offset is None:
+            p = np.array([0.0, 0.0, 0.0])
+        else:
+            p = (targ_mean + offset) - src_mean
         prevp = p
         prevdist = np.inf
         K = max_iters

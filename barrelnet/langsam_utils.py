@@ -29,6 +29,8 @@ def save_mask(mask_np, filename):
 def display_image_with_masks(image, masks, boxes, logits, figwidth=15, savefig=None, all_masks=True, show_confidence=True, show=True):
     if not all_masks:
         masks = masks[:1]
+        boxes = boxes[:1]
+        logits = logits[:1]
     num_masks = len(masks)
 
     fig, axes = plt.subplots(1, num_masks + 1, figsize=(figwidth, 5))
