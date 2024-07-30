@@ -1,7 +1,77 @@
-import matplotlib.pyplot as plt
+"""Utilities related to synthetic barrel/cylinder generation."""
+
 import numpy as np
 import scipy.linalg
 
+
+class Cylinder:
+    """Everything cylinder."""
+
+    def __init__(self, x1, x2, r):
+        """
+        Args:
+            x1: endpoint 1
+            x2: endpoint 2
+            r : radius
+        """
+        self.x1 = np.array(x1)
+        self.x2 = np.array(x2)
+        self.r = r
+        self.axis = self.x2 - self.x1
+        self.h = np.linalg.norm(self.axis)
+        self.axis = self.axis / self.h
+        # centroid
+        self.c = (self.x1 + self.x2) / 2
+
+    @classmethod
+    def from_mat_params(cls, params):
+        params = np.array(params)
+        if len(params.shape) == 2:
+            params = params[0]
+        return cls(params[:3], params[3:6], params[6])
+
+    @classmethod
+    def from_axis(cls, axis, r, h, c=None):
+        """
+        By default initializes a cylinder centered at (0, 0, 0).
+        """
+        axis = np.array(axis)
+        if c is None:
+            c = np.zeros(3)
+        c = np.array(c)
+        axis = axis / np.linalg.norm(axis)
+        # force vector to point up
+        if axis[2] < 0:
+            axis = -axis
+        x1 = -axis * (h / 2)
+        x2 = axis * (h / 2)
+        return cls(x1 + c, x2 + c, r)
+
+    def __repr__(self):
+        return f"Cylinder(x1={self.x1}, x2={self.x2}, r={self.r})"
+
+    def transform(self, T):
+        T = np.array(T)
+        x1hom = np.hstack([self.x1, 1])
+        x2hom = np.hstack([self.x2, 1])
+        return Cylinder((T @ x1hom)[:3], (T @ x2hom)[:3], self.r)
+
+    def translate(self, t):
+        t = np.array(t)
+        return Cylinder(self.x1 + t, self.x2 + t, self.r)
+
+    def get_random_pts_vol(self, npoints, sigma=0):
+        return random_cylinder_vol(self.x1, self.x2, self.r, npoints, sigma=sigma)
+
+    def get_random_pts_surf(self, npoints, sigma=0, includecap=True):
+        return random_cylinder_surf(self.x1, self.x2, self.r, npoints, sigma=sigma, includecap=includecap)
+    
+    def get_volume_ratio_monte(self, npoints, planecoeffs=None):
+        return monte_carlo_volume_ratio(npoints, self.x1, self.x2, self.r, planecoeffs=planecoeffs)
+    
+    def get_pts_surf(self, nt=100, nv=50):
+        return get_cylinder_surf(self.x1, self.x2, self.r, nt=nt, nv=nv)
+    
 
 def random_cylinder_vol(x1, x2, r, npoints, sigma=0):
     """
@@ -23,7 +93,8 @@ def random_cylinder_vol(x1, x2, r, npoints, sigma=0):
     cosval = np.tile(axnull1, (npoints, 1)) * rand_r[..., None] * np.cos(rand_theta)[..., None]
     sinval = np.tile(axnull2, (npoints, 1)) * rand_r[..., None] * np.sin(rand_theta)[..., None]
     xyzs = cosval + sinval + np.tile(x1, (npoints, 1)) + rand_h[..., None] * np.tile(axis, (npoints, 1))
-    xyzs += np.random.normal(0, sigma, xyzs.shape)
+    if sigma > 0:
+        xyzs += np.random.normal(0, sigma, xyzs.shape)
     return xyzs
 
 
@@ -59,7 +130,8 @@ def random_cylinder_surf(x1, x2, r, npoints, sigma=0, includecap=True):
     cosval = np.tile(axnull1, (npoints, 1)) * rand_r[..., None] * np.cos(rand_theta)[..., None]
     sinval = np.tile(axnull2, (npoints, 1)) * rand_r[..., None] * np.sin(rand_theta)[..., None]
     xyzs = cosval + sinval + np.tile(x1, (npoints, 1)) + rand_h[..., None] * np.tile(axis, (npoints, 1))
-    xyzs += np.random.normal(0, sigma, xyzs.shape)
+    if sigma > 0:
+        xyzs += np.random.normal(0, sigma, xyzs.shape)
     return xyzs
 
 
@@ -70,11 +142,20 @@ def classify_points(points, a, b, c, d):
     return (above_plane).sum(), (~above_plane).sum()
 
 
-def monte_carlo_volume_ratio(n_points, x1, x2, r, a, b, c, d):
-    """Monte Carlo method to estimate buried volume ratio (percent buried)."""
-    points = random_cylinder_vol(x1, x2, r, n_points)
+def monte_carlo_volume_ratio(npoints, x1, x2, r, planecoeffs=None):
+    """
+    Monte Carlo method to estimate buried volume ratio (percent buried as decimal).
+    
+    Args:
+        planecoeffs: [a, b, c, d]
+    """
+    if planecoeffs is None:
+        a, b, c, d = 0.0, 0.0, 1.0, 0.0
+    else:
+        a, b, c, d = planecoeffs
+    points = random_cylinder_vol(x1, x2, r, npoints)
     above_plane, below_plane = classify_points(points, a, b, c, d)
-    ratio = below_plane / n_points
+    ratio = below_plane / npoints
     return ratio
 
 
@@ -135,11 +216,16 @@ def get_cyl_endpoints(cylax, h, offset, axidx=2):
 
 def get_cylinder_surf(x1, x2, r, nt=100, nv=50):
     """
-    parametrize the cylinder of radius r, and endpoints x1, x2.
+    Returns x,y,z meshgrids for plotting a cylinder surface.
+    
+    Parametrize the cylinder of radius r, and endpoints x1, x2.
     
     Args:
         nt: number of angles
         nv: number of heights
+    
+    Returns:
+        x, y, z meshgrids
     """
     x1 = np.array(x1)
     x2 = np.array(x2)
@@ -162,52 +248,3 @@ def get_cylinder_surf(x1, x2, r, nt=100, nv=50):
     y = xyzs[:, 1].reshape(gridshape)
     z = xyzs[:, 2].reshape(gridshape)
     return x, y, z
-
-
-def plot_cylinder_and_plane(r, h, a, b, c, d):
-    """Function to plot the cylinder and the plane"""
-    fig = plt.figure()
-    ax = fig.add_subplot(111, projection='3d')
-    
-    # Plotting the cylinder
-    z = np.linspace(0, h, 100)
-    theta = np.linspace(0, 2 * np.pi, 100)
-    theta, z = np.meshgrid(theta, z)
-    x = r * np.cos(theta)
-    y = r * np.sin(theta)
-    ax.plot_surface(x, y, z, color='cyan', alpha=0.5)
-
-    # Creating a grid for the plane
-    xx, yy = np.meshgrid(np.linspace(-r, r, 100), np.linspace(-r, r, 100))
-    zz = (-d - a * xx - b * yy) / c
-
-    # Plotting the plane
-    ax.plot_surface(xx, yy, zz, color='orange', alpha=0.5)
-
-    ax.set_xlabel('X')
-    ax.set_ylabel('Y')
-    ax.set_zlabel('Z')
-    
-    # Setting the limits for better visualization
-    ax.set_xlim([-r, r])
-    ax.set_ylim([-r, r])
-    ax.set_zlim([0, h])
-    
-    plt.show()
-
-
-if __name__ == "__main__":
-    # Parameters of the cylinder and plane
-    r = 1  # radius
-    h = 2  # height
-    a, b, c, d = 1, 1, 1, -1  # plane equation ax + by + cz + d = 0
-
-    # Number of random points to sample
-    n_points = 1000000
-
-    # Calculate the volume ratio
-    volume_ratio = monte_carlo_volume_ratio(n_points, r, h, a, b, c, d)
-    print("Estimated Volume Ratio:", volume_ratio)
-
-    # Plotting the cylinder and plane
-    plot_cylinder_and_plane(r, h, a, b, c, d)

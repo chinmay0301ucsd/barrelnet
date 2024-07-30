@@ -169,15 +169,15 @@ def icp_translate(source_pc, target_pc, max_iters=20, tol=1e-3, verbose=False, n
     target point cloud.
     
     source_pc assumed to be smaller than target_pc
+    
+    Returns:
+        translation: 3d numpy array
     """
     src_mean = np.mean(source_pc, axis=0)
     targ_mean = np.mean(target_pc, axis=0)
     scale = np.max(np.linalg.norm(target_pc - targ_mean, axis=1))
-    src_cent = source_pc - src_mean
-    targ_cent = target_pc - targ_mean
-
-    src_kd = KDTree(source_pc)
     target_kd = KDTree(target_pc)
+
     if ntheta > 0 and nphi > 0:
         thetas = np.linspace(0, 2 * np.pi, ntheta + 1)[:-1]
         phis = np.linspace(0, np.pi, nphi + 2)[1:-1]
@@ -215,6 +215,4 @@ def icp_translate(source_pc, target_pc, max_iters=20, tol=1e-3, verbose=False, n
         allmeandists[j] = np.mean(meandist)
         alltranslations[j, :] = p
     bestidx = np.argmin(allmeandists)
-    # pose = np.eye(4)
-    # pose[:3, 3] = alltranslations[bestidx]
     return alltranslations[bestidx]

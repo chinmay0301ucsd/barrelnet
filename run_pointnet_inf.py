@@ -1,3 +1,7 @@
+"""
+Synthetic data inference test. Need to run in background since ICP is omega slow.
+"""
+
 import os
 from pathlib import Path
 
