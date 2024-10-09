@@ -1,11 +1,10 @@
-# barrels (put paper name here or something)
+# Pose Estimation of buried Deep Sea Barrels 
 
-You want barrels? We got barrels.
+BarrelNet Training and Complete Inference Pipeline. 
 
 ## Environment setup
 
-Just run this, I'll deal with a requirements file later. If anything is still missing after
-installation just pip install it.
+TBD. Clean up in Progress.
 
 ```shell
 git clone https://github.com/chinmay0301ucsd/barrelnet.git
